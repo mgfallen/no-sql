@@ -13,6 +13,7 @@ func main() {
 	healthHandler := handler.NewHealthHandler()
 
 	srv := server.New(
+		cfg.AppHost,
 		cfg.AppPort,
 		healthHandler.Health,
 	)

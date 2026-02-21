@@ -1,6 +1,7 @@
 package server
 
 import (
+	"fmt"
 	"net/http"
 )
 
@@ -8,13 +9,15 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func New(port string, healthHandler http.HandlerFunc) *Server {
+func New(host, port string, healthHandler http.HandlerFunc) *Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", healthHandler)
 
+	addr := fmt.Sprintf("%s:%s", host, port)
+
 	return &Server{
 		httpServer: &http.Server{
-			Addr:    ":" + port,
+			Addr:    addr,
 			Handler: mux,
 		},
 	}
