@@ -9,9 +9,11 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func New(host, port string, healthHandler http.HandlerFunc) *Server {
+func New(host, port string, healthHandler http.HandlerFunc, sessionHandler http.Handler) *Server {
 	mux := http.NewServeMux()
+
 	mux.HandleFunc("/health", healthHandler)
+	mux.Handle("/session", sessionHandler)
 
 	addr := fmt.Sprintf("%s:%s", host, port)
 

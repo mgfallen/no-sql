@@ -1,14 +1,25 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 )
 
-type HealthHandler struct{}
+type SessionChecker interface {
+	CheckExists(ctx context.Context, sid string) (bool, error)
+}
 
-func NewHealthHandler() *HealthHandler {
-	return &HealthHandler{}
+type HealthHandler struct {
+	service    SessionChecker
+	sessionTTL int
+}
+
+func NewHealthHandler(svc SessionChecker, ttl int) *HealthHandler {
+	return &HealthHandler{
+		service:    svc,
+		sessionTTL: ttl,
+	}
 }
 
 func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
@@ -17,12 +28,21 @@ func (h *HealthHandler) Health(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := map[string]string{
-		"status": "ok",
+	if cookie, err := r.Cookie("X-Session-Id"); err == nil {
+		exists, _ := h.service.CheckExists(r.Context(), cookie.Value)
+
+		if exists {
+			http.SetCookie(w, &http.Cookie{
+				Name:     "X-Session-Id",
+				Value:    cookie.Value,
+				Path:     "/",
+				HttpOnly: true,
+				MaxAge:   h.sessionTTL,
+			})
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-
-	_ = json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
