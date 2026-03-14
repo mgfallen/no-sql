@@ -17,13 +17,6 @@ type Config struct {
 	RedisPort     string
 	RedisPassword string
 	RedisDB       int
-
-	// MONGODB
-	MongoDatabase string
-	MongoUser     string
-	MongoPassword string
-	MongoHost     string
-	MongoPort     string
 }
 
 func Load() *Config {
@@ -32,18 +25,12 @@ func Load() *Config {
 		AppPort: requiredEnv("APP_PORT"),
 
 		// REDIS SPECIFIC
-		SessionTTL:    requiredEnvInt("APP_USER_SESSION_TTL"),
-		RedisHost:     requiredEnv("REDIS_HOST"),
-		RedisPort:     requiredEnv("REDIS_PORT"),
+		SessionTTL: requiredEnvInt("APP_USER_SESSION_TTL"),
+		RedisHost:  requiredEnv("REDIS_HOST"),
+		RedisPort:  requiredEnv("REDIS_PORT"),
+
 		RedisPassword: getEnvString("REDIS_PASSWORD", ""),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
-
-		// MONGO SPECIFIC
-		MongoDatabase: requiredEnv("MONGO_DB_NAME"),
-		MongoHost:     requiredEnv("MONGO_HOST"),
-		MongoPort:     requiredEnv("MONGO_PORT"),
-		MongoUser:     getEnvString("MONGO_USER", ""),
-		MongoPassword: getEnvString("MONGO_PASSWORD", ""),
 	}
 }
 

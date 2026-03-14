@@ -9,23 +9,11 @@ type Server struct {
 	httpServer *http.Server
 }
 
-// New - конструктор
-func New(
-	host, port string,
-	healthHandler http.HandlerFunc,
-	sessionHandler http.Handler,
-	userRegisterHandler http.HandlerFunc,
-	userProfileHandler http.HandlerFunc,
-) *Server {
+func New(host, port string, healthHandler http.HandlerFunc, sessionHandler http.Handler) *Server {
 	mux := http.NewServeMux()
 
-	// Существующие хендлеры
 	mux.HandleFunc("/health", healthHandler)
 	mux.Handle("/session", sessionHandler)
-
-	// Новые хендлеры для работы с пользователями
-	mux.HandleFunc("/user/register", userRegisterHandler)
-	mux.HandleFunc("/user/profile", userProfileHandler)
 
 	addr := fmt.Sprintf("%s:%s", host, port)
 
