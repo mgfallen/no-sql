@@ -52,6 +52,18 @@ func (r *SessionRepository) RefreshTTL(ctx context.Context, sid string) error {
 	return err
 }
 
+func (r *SessionRepository) GetUserIDBySession(ctx context.Context, sid string) (string, error) {
+	key := fmt.Sprintf("sid:%s", sid)
+	userID, err := r.client.HGet(ctx, key, "user_id").Result()
+	if err != nil {
+		if errors.Is(err, redis.Nil) {
+			return "", nil
+		}
+		return "", err
+	}
+	return userID, nil
+}
+
 func (r *SessionRepository) Exists(ctx context.Context, sid string) (bool, error) {
 	key := fmt.Sprintf("sid:%s", sid)
 	res, err := r.client.Exists(ctx, key).Result()
@@ -59,4 +71,12 @@ func (r *SessionRepository) Exists(ctx context.Context, sid string) (bool, error
 		return false, nil
 	}
 	return res > 0, err
+}
+
+func (r *SessionRepository) BindUser(ctx context.Context, sid string, userID string) error {
+	return r.client.HSet(ctx, fmt.Sprintf("sid:%s", sid), "user_id", userID).Err()
+}
+
+func (r *SessionRepository) DeleteSession(ctx context.Context, sid string) error {
+	return r.client.Del(ctx, fmt.Sprintf("sid:%s", sid)).Err()
 }

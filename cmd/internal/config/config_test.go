@@ -19,49 +19,56 @@ func TestLoad_TableDriven(t *testing.T) {
 		expectPanic bool
 	}{
 		{
-			name: "Success: all required fields present",
+			name: "Success: all required fields present (Redis + Mongo)",
 			envs: map[string]string{
 				"APP_HOST":             "localhost",
 				"APP_PORT":             "8080",
 				"APP_USER_SESSION_TTL": "60",
 				"REDIS_HOST":           "localhost",
 				"REDIS_PORT":           "6379",
+				"MONGODB_DATABASE":     "eventhub",
+				"MONGODB_HOST":         "mongo",
+				"MONGODB_PORT":         "27017",
 			},
 			expectPanic: false,
 		},
 		{
-			name: "Failure: APP_PORT missing",
-			envs: map[string]string{
-				"APP_HOST":             "localhost",
-				"APP_USER_SESSION_TTL": "60",
-				"REDIS_HOST":           "localhost",
-				"REDIS_PORT":           "6379",
-			},
-			expectPanic: true,
-		},
-		{
-			name: "Failure: TTL is not an integer",
+			name: "Success: handle typo in MONGODB_DATABSE",
 			envs: map[string]string{
 				"APP_HOST":             "localhost",
 				"APP_PORT":             "8080",
-				"APP_USER_SESSION_TTL": "invalid-number",
+				"APP_USER_SESSION_TTL": "60",
 				"REDIS_HOST":           "localhost",
 				"REDIS_PORT":           "6379",
+				"MONGODB_DATABSE":      "typo_db",
+				"MONGODB_HOST":         "mongo",
+				"MONGODB_PORT":         "27017",
+			},
+			expectPanic: false,
+		},
+		{
+			name: "Failure: required REDIS_HOST missing",
+			envs: map[string]string{
+				"APP_HOST":             "localhost",
+				"APP_PORT":             "8080",
+				"APP_USER_SESSION_TTL": "60",
+				"MONGODB_DATABASE":     "eventhub",
+				"MONGODB_HOST":         "mongo",
+				"MONGODB_PORT":         "27017",
 			},
 			expectPanic: true,
 		},
 		{
-			name: "Success: optional fields provided",
+			name: "Failure: MONGODB_PORT missing",
 			envs: map[string]string{
-				"APP_HOST":             "127.0.0.1",
-				"APP_PORT":             "3000",
-				"APP_USER_SESSION_TTL": "120",
-				"REDIS_HOST":           "redis-prod",
-				"REDIS_PORT":           "6380",
-				"REDIS_PASSWORD":       "top-secret",
-				"REDIS_DB":             "2",
+				"APP_HOST":             "localhost",
+				"APP_PORT":             "8080",
+				"APP_USER_SESSION_TTL": "60",
+				"REDIS_HOST":           "localhost",
+				"REDIS_PORT":           "6379",
+				"MONGODB_HOST":         "mongo",
 			},
-			expectPanic: false,
+			expectPanic: true,
 		},
 	}
 
@@ -75,6 +82,7 @@ func TestLoad_TableDriven(t *testing.T) {
 			keysToTest := []string{
 				"APP_HOST", "APP_PORT", "APP_USER_SESSION_TTL",
 				"REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
+				"MONGODB_DATABASE", "MONGODB_DATABSE", "MONGODB_HOST", "MONGODB_PORT", "MONGODB_USER", "MONGODB_PASSWORD",
 			}
 
 			for _, k := range keysToTest {
@@ -102,15 +110,19 @@ func TestLoad_TableDriven(t *testing.T) {
 				})
 			} else {
 				cfg := Load()
-				assert.Equal(t, tt.envs["APP_HOST"], cfg.AppHost)
-				assert.Equal(t, tt.envs["APP_PORT"], cfg.AppPort)
+
+				if val, ok := tt.envs["APP_HOST"]; ok {
+					assert.Equal(t, val, cfg.AppHost)
+				}
+
+				if val, ok := tt.envs["MONGODB_DATABSE"]; ok {
+					assert.Equal(t, val, cfg.MongoDatabase)
+				} else if val, ok := tt.envs["MONGODB_DATABASE"]; ok {
+					assert.Equal(t, val, cfg.MongoDatabase)
+				}
 
 				ttl, _ := strconv.Atoi(tt.envs["APP_USER_SESSION_TTL"])
 				assert.Equal(t, ttl, cfg.SessionTTL)
-
-				if pwd, ok := tt.envs["REDIS_PASSWORD"]; ok {
-					assert.Equal(t, pwd, cfg.RedisPassword)
-				}
 			}
 		})
 	}

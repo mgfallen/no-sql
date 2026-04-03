@@ -6,23 +6,20 @@ import (
 	"encoding/hex"
 )
 
-// SessionRepo - интерфейс хранилища
+// SessionRepo - обновленный интерфейс хранилища (Redis)
 type SessionRepo interface {
 	CreateSession(ctx context.Context, sid string) (bool, error)
 	RefreshTTL(ctx context.Context, sid string) error
 	Exists(ctx context.Context, sid string) (bool, error)
+	GetUserIDBySession(ctx context.Context, sid string) (string, error)
 }
 
-// SessionService - сервис для сессии
 type SessionService struct {
 	repo SessionRepo
 }
 
-// NewSessionService - конструктор
 func NewSessionService(repo SessionRepo) *SessionService {
-	return &SessionService{
-		repo: repo,
-	}
+	return &SessionService{repo: repo}
 }
 
 func (s *SessionService) GenerateSID() (string, error) {
@@ -33,15 +30,27 @@ func (s *SessionService) GenerateSID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// HandleSessionRequest -
+func (s *SessionService) CheckExists(ctx context.Context, sid string) (bool, error) {
+	if sid == "" {
+		return false, nil
+	}
+	return s.repo.Exists(ctx, sid)
+}
+
+// GetUserID реализует метод интерфейса SessionManager из хендлера
+func (s *SessionService) GetUserID(ctx context.Context, sid string) (string, error) {
+	if sid == "" {
+		return "", nil
+	}
+	return s.repo.GetUserIDBySession(ctx, sid)
+}
+
+// HandleSessionRequest оставляем для совместимости с прошлыми лабами
 func (s *SessionService) HandleSessionRequest(ctx context.Context, existingSid string) (string, bool, error) {
 	if existingSid != "" {
 		exists, err := s.repo.Exists(ctx, existingSid)
 		if err == nil && exists {
-			err = s.repo.RefreshTTL(ctx, existingSid)
-			if err != nil {
-				return "", false, err
-			}
+			_ = s.repo.RefreshTTL(ctx, existingSid)
 			return existingSid, false, nil
 		}
 	}
@@ -53,12 +62,4 @@ func (s *SessionService) HandleSessionRequest(ctx context.Context, existingSid s
 
 	_, err = s.repo.CreateSession(ctx, newSid)
 	return newSid, true, err
-}
-
-// CheckExists -
-func (s *SessionService) CheckExists(ctx context.Context, sid string) (bool, error) {
-	if sid == "" {
-		return false, nil
-	}
-	return s.repo.Exists(ctx, sid)
 }

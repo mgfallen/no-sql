@@ -2,27 +2,23 @@ package repository
 
 import (
 	"context"
-	"errors"
+	"time"
 
-	"no-sql/cmd/internal/domain" // проверь правильность пути
+	"no-sql/cmd/internal/domain"
 
-	"go.mongodb.org/mongo-driver/bson"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
-// MongoRepository - репозиторий с монгой
 type MongoRepository struct {
 	db *mongo.Database
 }
 
-// NewMongoRepository - конструктор
 func NewMongoRepository(db *mongo.Database) *MongoRepository {
 	return &MongoRepository{db: db}
 }
 
-// InitIndices - инициализация индексов
 func (r *MongoRepository) InitIndices(ctx context.Context) error {
 	_, err := r.db.Collection("users").Indexes().CreateOne(ctx, mongo.IndexModel{
 		Keys:    bson.D{{Key: "username", Value: 1}},
@@ -49,13 +45,18 @@ func (r *MongoRepository) InitIndices(ctx context.Context) error {
 	return err
 }
 
-// CreateUser - создание пользователя
 func (r *MongoRepository) CreateUser(ctx context.Context, user *domain.User) error {
-	_, err := r.db.Collection("users").InsertOne(ctx, user)
-	return err
+	res, err := r.db.Collection("users").InsertOne(ctx, user)
+	if err != nil {
+		return err
+	}
+
+	if oid, ok := res.InsertedID.(bson.ObjectID); ok {
+		user.ID = oid
+	}
+	return nil
 }
 
-// GetUserByUsername - поиск пользователя
 func (r *MongoRepository) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	var user domain.User
 	err := r.db.Collection("users").FindOne(ctx, bson.M{"username": username}).Decode(&user)
@@ -65,37 +66,42 @@ func (r *MongoRepository) GetUserByUsername(ctx context.Context, username string
 	return &user, nil
 }
 
-// CreateEvent - создание события
 func (r *MongoRepository) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
+	event.CreatedAt = time.Now().Format(time.RFC3339)
 	res, err := r.db.Collection("events").InsertOne(ctx, event)
 	if err != nil {
 		return "", err
 	}
-	// Кастуем InsertedID к ObjectID и возвращаем Hex-строку
-	if oid, ok := res.InsertedID.(primitive.ObjectID); ok {
+
+	if oid, ok := res.InsertedID.(bson.ObjectID); ok {
 		return oid.Hex(), nil
 	}
-	return "", errors.New("failed to convert inserted id to hex")
+
+	return "", nil
 }
 
-// ListEvents - поиск с фильтрацией
-func (r *MongoRepository) ListEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, error) {
+func (r *MongoRepository) GetEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error) {
 	filter := bson.M{}
 	if title != "" {
 		filter["title"] = bson.M{"$regex": title, "$options": "i"}
 	}
 
+	count, err := r.db.Collection("events").CountDocuments(ctx, filter)
+	if err != nil {
+		return nil, 0, err
+	}
+
 	opts := options.Find().SetLimit(limit).SetSkip(offset)
 	cursor, err := r.db.Collection("events").Find(ctx, filter, opts)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	defer cursor.Close(ctx)
 
 	events := make([]domain.Event, 0)
 	if err = cursor.All(ctx, &events); err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 
-	return events, nil
+	return events, count, nil
 }

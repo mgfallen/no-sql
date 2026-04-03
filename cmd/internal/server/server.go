@@ -1,7 +1,7 @@
 package server
 
 import (
-	"fmt"
+	"net"
 	"net/http"
 )
 
@@ -9,13 +9,40 @@ type Server struct {
 	httpServer *http.Server
 }
 
-func New(host, port string, healthHandler http.HandlerFunc, sessionHandler http.Handler) *Server {
+// New - конструктор
+func New(
+	host, port string,
+	healthHandler http.HandlerFunc,
+	sessionHandler http.Handler,
+	registerHandler http.HandlerFunc,
+	loginHandler http.HandlerFunc,
+	logoutHandler http.HandlerFunc,
+	createEventHandler http.HandlerFunc,
+	listEventsHandler http.HandlerFunc,
+) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", healthHandler)
+
 	mux.Handle("/session", sessionHandler)
 
-	addr := fmt.Sprintf("%s:%s", host, port)
+	mux.HandleFunc("/users", registerHandler)
+
+	mux.HandleFunc("/auth/login", loginHandler)
+	mux.HandleFunc("/auth/logout", logoutHandler)
+
+	mux.HandleFunc("/events", func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost:
+			createEventHandler(w, r)
+		case http.MethodGet:
+			listEventsHandler(w, r)
+		default:
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
+
+	addr := net.JoinHostPort(host, port)
 
 	return &Server{
 		httpServer: &http.Server{

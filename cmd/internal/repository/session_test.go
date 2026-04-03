@@ -154,3 +154,92 @@ func TestSessionRepository_Exists(t *testing.T) {
 		})
 	}
 }
+
+func TestSessionRepository_BindUser(t *testing.T) {
+	t.Parallel()
+
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	repo := NewSessionRepository(client, 60)
+	ctx := context.Background()
+
+	sid := "test-session"
+	userID := "user-12345"
+
+	t.Run("Successfully bind user to session", func(t *testing.T) {
+		err := repo.BindUser(ctx, sid, userID)
+
+		assert.NoError(t, err)
+		assert.Equal(t, userID, mr.HGet("sid:"+sid, "user_id"))
+	})
+}
+func TestSessionRepository_GetUserIDBySession(t *testing.T) {
+	t.Parallel()
+
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	repo := NewSessionRepository(client, 60)
+	ctx := context.Background()
+
+	tests := []struct {
+		name           string
+		sid            string
+		setup          func(mr *miniredis.Miniredis)
+		expectedUserID string
+	}{
+		{
+			name: "User ID found",
+			sid:  "sid-with-user",
+			setup: func(mr *miniredis.Miniredis) {
+				mr.HSet("sid:sid-with-user", "user_id", "user-777")
+			},
+			expectedUserID: "user-777",
+		},
+		{
+			name: "Session exists but no user_id bound",
+			sid:  "sid-no-user",
+			setup: func(mr *miniredis.Miniredis) {
+				mr.HSet("sid:sid-no-user", "created_at", "now")
+			},
+			expectedUserID: "",
+		},
+		{
+			name:           "Session does not exist at all",
+			sid:            "ghost-sid",
+			setup:          func(mr *miniredis.Miniredis) {},
+			expectedUserID: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setup(mr)
+
+			uid, err := repo.GetUserIDBySession(ctx, tt.sid)
+
+			assert.NoError(t, err)
+			assert.Equal(t, tt.expectedUserID, uid)
+		})
+	}
+}
+
+func TestSessionRepository_DeleteSession(t *testing.T) {
+	t.Parallel()
+
+	mr := miniredis.RunT(t)
+	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	repo := NewSessionRepository(client, 60)
+	ctx := context.Background()
+
+	sid := "to-be-deleted"
+	mr.HSet("sid:"+sid, "data", "val")
+
+	t.Run("Successfully delete session", func(t *testing.T) {
+		assert.True(t, mr.Exists("sid:"+sid))
+
+		err := repo.DeleteSession(ctx, sid)
+
+		assert.NoError(t, err)
+		assert.False(t, mr.Exists("sid:"+sid))
+	})
+}

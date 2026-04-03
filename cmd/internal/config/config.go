@@ -17,20 +17,38 @@ type Config struct {
 	RedisPort     string
 	RedisPassword string
 	RedisDB       int
+
+	// MONGODB
+	MongoDatabase string
+	MongoUser     string
+	MongoPassword string
+	MongoHost     string
+	MongoPort     string
 }
 
 func Load() *Config {
+	// Сначала проверяем базу с опечаткой, потом нормальную
+	mongoDb := os.Getenv("MONGODB_DATABSE")
+	if mongoDb == "" {
+		mongoDb = getEnvString("MONGODB_DATABASE", "eventhub")
+	}
+
 	return &Config{
-		AppHost: requiredEnv("APP_HOST"),
-		AppPort: requiredEnv("APP_PORT"),
+		AppHost: getEnvString("APP_HOST", "0.0.0.0"),
+		AppPort: getEnvString("APP_PORT", "8080"),
 
-		// REDIS SPECIFIC
 		SessionTTL: requiredEnvInt("APP_USER_SESSION_TTL"),
-		RedisHost:  requiredEnv("REDIS_HOST"),
-		RedisPort:  requiredEnv("REDIS_PORT"),
 
-		RedisPassword: getEnvString("REDIS_PASSWORD", ""),
+		RedisHost:     requiredEnv("REDIS_HOST"),
+		RedisPort:     requiredEnv("REDIS_PORT"),
+		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 		RedisDB:       getEnvInt("REDIS_DB", 0),
+
+		MongoDatabase: mongoDb,
+		MongoUser:     os.Getenv("MONGODB_USER"),
+		MongoPassword: os.Getenv("MONGODB_PASSWORD"),
+		MongoHost:     requiredEnv("MONGODB_HOST"),
+		MongoPort:     requiredEnv("MONGODB_PORT"),
 	}
 }
 

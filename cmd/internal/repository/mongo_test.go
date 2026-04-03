@@ -13,16 +13,16 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/modules/mongodb"
 	"github.com/testcontainers/testcontainers-go/wait"
-	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
+
+	// Обновленные импорты для v2
+	"go.mongodb.org/mongo-driver/v2/bson"
+	"go.mongodb.org/mongo-driver/v2/mongo"
+	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
 
 var testClient *mongo.Client
 
 func TestMain(m *testing.M) {
-	os.Setenv("TESTCONTAINERS_DOCKER_ROOTLESS", "false")
-
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
@@ -42,11 +42,19 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 
-	client, err := mongo.Connect(ctx, options.Client().ApplyURI(endpoint).SetMaxPoolSize(50))
+	client, err := mongo.Connect(options.Client().ApplyURI(endpoint).SetMaxPoolSize(50))
 	if err != nil {
 		fmt.Printf("Failed to connect to Mongo: %v\n", err)
 		os.Exit(1)
 	}
+
+	pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	if err := client.Ping(pingCtx, nil); err != nil {
+		pingCancel()
+		fmt.Printf("Failed to ping Mongo: %v\n", err)
+		os.Exit(1)
+	}
+	pingCancel()
 
 	testClient = client
 	code := m.Run()
@@ -58,12 +66,11 @@ func TestMain(m *testing.M) {
 
 func setupTestDB(t *testing.T) (*mongo.Database, func()) {
 	t.Helper()
-	dbName := fmt.Sprintf("db_%d_%s", time.Now().UnixNano(), primitive.NewObjectID().Hex())
+	// Используем primitive из v2
+	dbName := fmt.Sprintf("db_%d_%s", time.Now().UnixNano(), bson.NewObjectID().Hex())
 	db := testClient.Database(dbName)
 	teardown := func() {
-		go func() {
-			_ = db.Drop(context.Background())
-		}()
+		_ = db.Drop(context.Background())
 	}
 	return db, teardown
 }
@@ -86,6 +93,7 @@ func TestMongoRepository_UserOps(t *testing.T) {
 			},
 			expectedError: nil,
 			checkResult: func(t *testing.T, user *domain.User) {
+				assert.NotNil(t, user)
 				assert.Equal(t, "Ivan", user.FullName)
 			},
 		},
@@ -100,7 +108,6 @@ func TestMongoRepository_UserOps(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db, teardown := setupTestDB(t)
 			defer teardown()
 			repo := NewMongoRepository(db)
@@ -133,7 +140,7 @@ func TestMongoRepository_CreateEvent(t *testing.T) {
 			name: "Success: unique event",
 			event: &domain.Event{
 				Title:     "Unique Party",
-				CreatedBy: primitive.NewObjectID().Hex(),
+				CreatedBy: bson.NewObjectID().Hex(),
 			},
 			prepare:       func(ctx context.Context, db *mongo.Database) {},
 			expectedError: false,
@@ -144,6 +151,7 @@ func TestMongoRepository_CreateEvent(t *testing.T) {
 				Title: "Repeat",
 			},
 			prepare: func(ctx context.Context, db *mongo.Database) {
+				// Используем domain.Event{} напрямую
 				_, _ = db.Collection("events").InsertOne(ctx, domain.Event{Title: "Repeat"})
 			},
 			expectedError: true,
@@ -152,11 +160,11 @@ func TestMongoRepository_CreateEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db, teardown := setupTestDB(t)
 			defer teardown()
 			repo := NewMongoRepository(db)
 			ctx := context.Background()
+
 			_ = repo.InitIndices(ctx)
 
 			tt.prepare(ctx, db)
@@ -182,17 +190,20 @@ func TestMongoRepository_ListEvents(t *testing.T) {
 		query     string
 		prepare   func(ctx context.Context, db *mongo.Database)
 		wantCount int
+		wantTotal int64
 	}{
 		{
 			name:  "Find exact",
 			query: "Go Workshop",
 			prepare: func(ctx context.Context, db *mongo.Database) {
-				_, _ = db.Collection("events").InsertMany(ctx, []interface{}{
+				events := []interface{}{
 					domain.Event{Title: "Go Workshop"},
 					domain.Event{Title: "Redis Talk"},
-				})
+				}
+				_, _ = db.Collection("events").InsertMany(ctx, events)
 			},
 			wantCount: 1,
+			wantTotal: 1,
 		},
 		{
 			name:  "Find none",
@@ -201,12 +212,12 @@ func TestMongoRepository_ListEvents(t *testing.T) {
 				_, _ = db.Collection("events").InsertOne(ctx, domain.Event{Title: "C++"})
 			},
 			wantCount: 0,
+			wantTotal: 0,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
 			db, teardown := setupTestDB(t)
 			defer teardown()
 			repo := NewMongoRepository(db)
@@ -214,10 +225,11 @@ func TestMongoRepository_ListEvents(t *testing.T) {
 
 			tt.prepare(ctx, db)
 
-			res, err := repo.ListEvents(ctx, tt.query, 10, 0)
+			res, total, err := repo.GetEvents(ctx, tt.query, 10, 0)
 
 			assert.NoError(t, err)
 			assert.Len(t, res, tt.wantCount)
+			assert.Equal(t, tt.wantTotal, total)
 		})
 	}
 }

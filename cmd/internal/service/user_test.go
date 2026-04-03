@@ -3,19 +3,28 @@ package service
 import (
 	"context"
 	"errors"
-	"testing"
-
 	"no-sql/cmd/internal/domain"
+	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// MockUserRepo - мок для репозитория
 type MockUserRepo struct {
 	mock.Mock
+}
+
+// Реализуем новые методы для событий
+func (m *MockUserRepo) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
+	args := m.Called(ctx, event)
+	return args.String(0), args.Error(1)
+}
+
+func (m *MockUserRepo) GetEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error) {
+	args := m.Called(ctx, title, limit, offset)
+	return args.Get(0).([]domain.Event), args.Get(1).(int64), args.Error(2)
 }
 
 func (m *MockUserRepo) CreateUser(ctx context.Context, user *domain.User) error {
@@ -29,6 +38,37 @@ func (m *MockUserRepo) GetUserByUsername(ctx context.Context, username string) (
 		return nil, args.Error(1)
 	}
 	return args.Get(0).(*domain.User), args.Error(1)
+}
+
+func TestUserService_CreateEvent(t *testing.T) {
+	t.Parallel()
+	svc, mockRepo := setupUserService()
+
+	event := &domain.Event{Title: "Party"}
+	mockRepo.On("CreateEvent", mock.Anything, mock.Anything).Return("event-id-123", nil)
+
+	id, err := svc.CreateEvent(context.Background(), event)
+
+	assert.NoError(t, err)
+	assert.Equal(t, "event-id-123", id)
+	assert.NotEmpty(t, event.CreatedAt) // Проверка, что сервис проставил дату
+	mockRepo.AssertExpectations(t)
+}
+
+func TestUserService_ListEvents(t *testing.T) {
+	t.Parallel()
+	svc, mockRepo := setupUserService()
+
+	expectedEvents := []domain.Event{{Title: "E1"}}
+	mockRepo.On("GetEvents", mock.Anything, "test", int64(10), int64(0)).
+		Return(expectedEvents, int64(1), nil)
+
+	events, count, err := svc.ListEvents(context.Background(), "test", 10, 0)
+
+	assert.NoError(t, err)
+	assert.Equal(t, int64(1), count)
+	assert.Len(t, events, 1)
+	mockRepo.AssertExpectations(t)
 }
 
 // setupUserService подготавливает окружение для теста
@@ -98,7 +138,7 @@ func TestUserService_Login(t *testing.T) {
 	correctPassword := "svp4_pass"
 	hash, _ := bcrypt.GenerateFromPassword([]byte(correctPassword), bcrypt.DefaultCost)
 
-	objID, err := primitive.ObjectIDFromHex("507f1f77bcf86cd799439011")
+	objID, err := bson.ObjectIDFromHex("507f1f77bcf86cd799439011")
 	if err != nil {
 		t.Fatalf("failed to create objectID: %v", err)
 	}
