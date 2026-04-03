@@ -1,0 +1,14 @@
+.git
+.github
+.gitignore
+.labrc
+CODEOWNERS
+.vscode
+.idea
+*.log
+*.test
+bin
+obj
+.env*
+docker-compose*
+Dockerfile

@@ -2,84 +2,116 @@ package config
 
 import (
 	"os"
+	"strconv"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 )
 
-func TestLoad(t *testing.T) {
-	t.Parallel()
+var envMu sync.Mutex
 
+func TestLoad_TableDriven(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
-		appPort     string
-		appHost     string
+		envs        map[string]string
 		expectPanic bool
 	}{
 		{
-			name:        "1. Both APP_PORT and APP_HOST are set",
-			appPort:     "8080",
-			appHost:     "localhost",
+			name: "Success: all required fields present",
+			envs: map[string]string{
+				"APP_HOST":             "localhost",
+				"APP_PORT":             "8080",
+				"APP_USER_SESSION_TTL": "60",
+				"REDIS_HOST":           "localhost",
+				"REDIS_PORT":           "6379",
+			},
 			expectPanic: false,
 		},
 		{
-			name:        "2. APP_PORT is not set",
-			appPort:     "",
-			appHost:     "localhost",
+			name: "Failure: APP_PORT missing",
+			envs: map[string]string{
+				"APP_HOST":             "localhost",
+				"APP_USER_SESSION_TTL": "60",
+				"REDIS_HOST":           "localhost",
+				"REDIS_PORT":           "6379",
+			},
 			expectPanic: true,
 		},
 		{
-			name:        "3. APP_HOST is not set",
-			appPort:     "8080",
-			appHost:     "",
+			name: "Failure: TTL is not an integer",
+			envs: map[string]string{
+				"APP_HOST":             "localhost",
+				"APP_PORT":             "8080",
+				"APP_USER_SESSION_TTL": "invalid-number",
+				"REDIS_HOST":           "localhost",
+				"REDIS_PORT":           "6379",
+			},
 			expectPanic: true,
 		},
 		{
-			name:        "4. Both APP_PORT and APP_HOST are not set",
-			appPort:     "",
-			appHost:     "",
-			expectPanic: true,
-		},
-		{
-			name:        "5. APP_PORT with different value",
-			appPort:     "3000",
-			appHost:     "127.0.0.1",
-			expectPanic: false,
-		},
-		{
-			name:        "6. APP_HOST with different value",
-			appPort:     "9090",
-			appHost:     "0.0.0.0",
+			name: "Success: optional fields provided",
+			envs: map[string]string{
+				"APP_HOST":             "127.0.0.1",
+				"APP_PORT":             "3000",
+				"APP_USER_SESSION_TTL": "120",
+				"REDIS_HOST":           "redis-prod",
+				"REDIS_PORT":           "6380",
+				"REDIS_PASSWORD":       "top-secret",
+				"REDIS_DB":             "2",
+			},
 			expectPanic: false,
 		},
 	}
 
 	for _, tt := range tests {
-		tt := tt
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
+			envMu.Lock()
+			defer envMu.Unlock()
 
-			oldPort := os.Getenv("APP_PORT")
-			oldHost := os.Getenv("APP_HOST")
+			oldEnvs := make(map[string]string)
+			keysToTest := []string{
+				"APP_HOST", "APP_PORT", "APP_USER_SESSION_TTL",
+				"REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
+			}
 
-			assert.NoError(t, os.Setenv("APP_PORT", tt.appPort))
-			assert.NoError(t, os.Setenv("APP_HOST", tt.appHost))
+			for _, k := range keysToTest {
+				oldEnvs[k] = os.Getenv(k)
+				os.Unsetenv(k)
+			}
 
 			defer func() {
-				assert.NoError(t, os.Setenv("APP_PORT", oldPort))
-				assert.NoError(t, os.Setenv("APP_HOST", oldHost))
+				for k, v := range oldEnvs {
+					if v != "" {
+						os.Setenv(k, v)
+					} else {
+						os.Unsetenv(k)
+					}
+				}
 			}()
+
+			for k, v := range tt.envs {
+				os.Setenv(k, v)
+			}
 
 			if tt.expectPanic {
 				assert.Panics(t, func() {
 					Load()
 				})
-				return
-			}
+			} else {
+				cfg := Load()
+				assert.Equal(t, tt.envs["APP_HOST"], cfg.AppHost)
+				assert.Equal(t, tt.envs["APP_PORT"], cfg.AppPort)
 
-			cfg := Load()
-			assert.Equal(t, tt.appPort, cfg.AppPort)
-			assert.Equal(t, tt.appHost, cfg.AppHost)
+				ttl, _ := strconv.Atoi(tt.envs["APP_USER_SESSION_TTL"])
+				assert.Equal(t, ttl, cfg.SessionTTL)
+
+				if pwd, ok := tt.envs["REDIS_PASSWORD"]; ok {
+					assert.Equal(t, pwd, cfg.RedisPassword)
+				}
+			}
 		})
 	}
 }
