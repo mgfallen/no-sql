@@ -11,10 +11,13 @@ services:
       - .env.local
     environment:
       - REDIS_HOST=redis_db
+      - MONGO_HOST=mongo_db
     ports:
       - "${APP_PORT}:${APP_PORT}"
     depends_on:
       redis_db:
+        condition: service_healthy
+      mongo_db:
         condition: service_healthy
     networks:
       - backend_net
@@ -39,6 +42,27 @@ services:
     networks:
       - backend_net
 
+  mongo_db:
+    image: mongo:6.0
+    container_name: mongodb-data-store
+    restart: always
+    ports:
+      - "${MONGO_PORT}:${MONGO_PORT}"
+    environment:
+      - MONGO_INITDB_DATABASE=${MONGO_DB_NAME}
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - backend_net
+
 networks:
   backend_net:
     driver: bridge
+
+volumes:
+  mongo_data:

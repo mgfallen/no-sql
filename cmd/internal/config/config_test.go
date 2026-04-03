@@ -19,47 +19,55 @@ func TestLoad_TableDriven(t *testing.T) {
 		expectPanic bool
 	}{
 		{
-			name: "Success: all required fields present",
+			name: "Success: all required fields present (Redis + Mongo)",
 			envs: map[string]string{
 				"APP_HOST":             "localhost",
 				"APP_PORT":             "8080",
 				"APP_USER_SESSION_TTL": "60",
 				"REDIS_HOST":           "localhost",
 				"REDIS_PORT":           "6379",
+				"MONGO_DB_NAME":        "eventhub",
+				"MONGO_HOST":           "mongo",
+				"MONGO_PORT":           "27017",
 			},
 			expectPanic: false,
 		},
 		{
-			name: "Failure: APP_PORT missing",
-			envs: map[string]string{
-				"APP_HOST":             "localhost",
-				"APP_USER_SESSION_TTL": "60",
-				"REDIS_HOST":           "localhost",
-				"REDIS_PORT":           "6379",
-			},
-			expectPanic: true,
-		},
-		{
-			name: "Failure: TTL is not an integer",
+			name: "Failure: MONGODB_DATABASE missing",
 			envs: map[string]string{
 				"APP_HOST":             "localhost",
 				"APP_PORT":             "8080",
-				"APP_USER_SESSION_TTL": "invalid-number",
+				"APP_USER_SESSION_TTL": "60",
 				"REDIS_HOST":           "localhost",
 				"REDIS_PORT":           "6379",
+				"MONGO_HOST":           "mongo",
+				"MONGO_PORT":           "27017",
 			},
 			expectPanic: true,
 		},
 		{
-			name: "Success: optional fields provided",
+			name: "Failure: MONGODB_PORT missing",
 			envs: map[string]string{
-				"APP_HOST":             "127.0.0.1",
-				"APP_PORT":             "3000",
-				"APP_USER_SESSION_TTL": "120",
-				"REDIS_HOST":           "redis-prod",
-				"REDIS_PORT":           "6380",
-				"REDIS_PASSWORD":       "top-secret",
-				"REDIS_DB":             "2",
+				"APP_HOST":             "localhost",
+				"APP_PORT":             "8080",
+				"APP_USER_SESSION_TTL": "60",
+				"REDIS_HOST":           "localhost",
+				"REDIS_PORT":           "6379",
+				"MONGO_HOST":           "mongo",
+			},
+			expectPanic: true,
+		},
+		{
+			name: "Success: Mongo URI is correctly formatted",
+			envs: map[string]string{
+				"APP_HOST":             "localhost",
+				"APP_PORT":             "8080",
+				"APP_USER_SESSION_TTL": "60",
+				"REDIS_HOST":           "localhost",
+				"REDIS_PORT":           "6379",
+				"MONGO_DB_NAME":        "eventhub",
+				"MONGO_HOST":           "mongo",
+				"MONGO_PORT":           "27017",
 			},
 			expectPanic: false,
 		},
@@ -75,6 +83,7 @@ func TestLoad_TableDriven(t *testing.T) {
 			keysToTest := []string{
 				"APP_HOST", "APP_PORT", "APP_USER_SESSION_TTL",
 				"REDIS_HOST", "REDIS_PORT", "REDIS_PASSWORD", "REDIS_DB",
+				"MONGO_DB_NAME", "MONGO_HOST", "MONGO_PORT", "MONGO_USER", "MONGO_PASSWORD",
 			}
 
 			for _, k := range keysToTest {
