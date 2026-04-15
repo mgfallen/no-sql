@@ -17,6 +17,7 @@ import (
 	"no-sql/cmd/internal/service"
 
 	"github.com/redis/go-redis/v9"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 	"go.mongodb.org/mongo-driver/v2/mongo/options"
 )
@@ -24,18 +25,14 @@ import (
 func main() {
 	cfg := config.Load()
 
-	// 1. Исправляем опечатку в названии базы данных из ТЗ (DATABSE)
-	mongoDBName := os.Getenv("MONGODB_DATABSE")
-	if mongoDBName == "" {
-		mongoDBName = cfg.MongoDatabase
-	}
-
+	// 1. Подключение к Redis (Sessions)
 	rdb := redis.NewClient(&redis.Options{
 		Addr:     net.JoinHostPort(cfg.RedisHost, cfg.RedisPort),
 		Password: cfg.RedisPassword,
 		DB:       cfg.RedisDB,
 	})
 
+	// 2. Подключение к MongoDB
 	mongoURI := fmt.Sprintf("mongodb://%s:%s", cfg.MongoHost, cfg.MongoPort)
 	clientOptions := options.Client().ApplyURI(mongoURI)
 
@@ -53,38 +50,37 @@ func main() {
 		log.Fatalf("Failed to create Mongo client: %v", err)
 	}
 
-	var pingErr error
-	for i := 0; i < 15; i++ {
-		pingCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-		pingErr = mClient.Ping(pingCtx, nil)
-		cancel()
-		if pingErr == nil {
-			log.Println("Successfully connected to MongoDB!")
-			break
-		}
-		log.Printf("Waiting for MongoDB... (attempt %d/15): %v", i+1, pingErr)
-		time.Sleep(2 * time.Second)
+	// Цикл ожидания доступности БД (Wait-for-it)
+	if err := retryPing(mClient); err != nil {
+		log.Fatalf("MongoDB unreachable: %v", err)
 	}
 
-	if pingErr != nil {
-		log.Fatalf("Failed to connect to MongoDB after retries: %v", pingErr)
+	// Исправляем опечатку из ТЗ, если переменная передана
+	dbName := os.Getenv("MONGODB_DATABSE")
+	if dbName == "" {
+		dbName = cfg.MongoDatabase
 	}
+	mDB := mClient.Database(dbName)
 
-	mDB := mClient.Database(mongoDBName)
-
+	// 3. Инициализация слоев
 	sessionRepo := repository.NewSessionRepository(rdb, cfg.SessionTTL)
+
+	// Наш единый репозиторий реализует и UserRepo, и EventRepo
 	mongoRepo := repository.NewMongoRepository(mDB)
 
+	// Создаем индексы (Unique для username и title)
 	if err = mongoRepo.InitIndices(context.Background()); err != nil {
-		log.Fatalf("Failed to init MongoDB indices: %v", err)
+		log.Printf("Warning: Indices init error (might exist): %v", err)
 	}
 
+	// Опционально: Настройка шардирования (для ЛР4)
+	enableSharding(context.Background(), mClient, dbName)
+
 	sessionSvc := service.NewSessionService(sessionRepo)
-	userSvc := service.NewUserService(mongoRepo)
+	userSvc := service.NewUserService(mongoRepo, mongoRepo)
 
 	healthH := handler.NewHealthHandler(sessionSvc, cfg.SessionTTL)
 	sessionH := handler.NewSessionHandler(sessionSvc, cfg.SessionTTL)
-
 	userH := handler.NewUserHandler(
 		userSvc,
 		sessionSvc,
@@ -92,10 +88,8 @@ func main() {
 		cfg.SessionTTL,
 	)
 
-	// 4. КРИТИЧНО: Чтобы Docker мог прокинуть порт, сервер ДОЛЖЕН слушать "0.0.0.0"
-	// В cfg.AppHost у тебя может быть 127.0.0.1, что "запрет" сервер внутри контейнера.
 	srv := server.New(
-		"0.0.0.0", // Слушаем на всех интерфейсах
+		cfg.AppHost,
 		cfg.AppPort,
 		healthH.Health,
 		sessionH,
@@ -104,20 +98,63 @@ func main() {
 		userH.Logout,
 		userH.CreateEvent,
 		userH.ListEvents,
+		userH.GetEvent,
+		userH.UpdateEvent,
+		userH.ListUsers,
 	)
 
+	// 5. Graceful Shutdown
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
 	go func() {
-		sigChan := make(chan os.Signal, 1)
-		signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-		<-sigChan
-		log.Println("Shutting down application...")
-		_ = rdb.Close()
-		_ = mClient.Disconnect(context.Background())
-		os.Exit(0)
+		log.Printf("Application is running on 0.0.0.0:%s", cfg.AppPort)
+		if err := srv.Run(); err != nil {
+			log.Fatalf("Server failed: %v", err)
+		}
 	}()
 
-	log.Printf("Application is running on 0.0.0.0:%s", cfg.AppPort)
-	if err = srv.Run(); err != nil {
-		log.Fatalf("Server failed: %v", err)
+	<-stop
+	log.Println("Shutting down gracefully...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	_ = rdb.Close()
+	_ = mClient.Disconnect(shutdownCtx)
+
+	log.Println("Stopped.")
+}
+
+// retryPing проверяет коннект с ретраями
+func retryPing(client *mongo.Client) error {
+	var err error
+	for i := 0; i < 10; i++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		err = client.Ping(ctx, nil)
+		cancel()
+		if err == nil {
+			log.Println("Successfully connected to MongoDB!")
+			return nil
+		}
+		log.Printf("Retrying MongoDB connection... (%d/10)", i+1)
+		time.Sleep(2 * time.Second)
+	}
+	return err
+}
+
+// enableSharding настраивает шардирование коллекции
+func enableSharding(ctx context.Context, client *mongo.Client, dbName string) {
+	res := client.Database("admin").RunCommand(ctx, bson.D{{Key: "enableSharding", Value: dbName}})
+	if res.Err() != nil {
+		log.Printf("Sharding DB notice: %v", res.Err())
+	}
+
+	res = client.Database("admin").RunCommand(ctx, bson.D{
+		{Key: "shardCollection", Value: fmt.Sprintf("%s.events", dbName)},
+		{Key: "key", Value: bson.D{{Key: "created_by", Value: "hashed"}}},
+	})
+	if res.Err() != nil {
+		log.Printf("Sharding Collection notice: %v", res.Err())
 	}
 }

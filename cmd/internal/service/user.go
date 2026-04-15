@@ -4,25 +4,37 @@ import (
 	"context"
 	"errors"
 	"no-sql/cmd/internal/domain"
-	"time"
 
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"golang.org/x/crypto/bcrypt"
 )
 
-// UserRepo -
+// UserRepo описывает методы работы с коллекцией пользователей
 type UserRepo interface {
 	CreateUser(ctx context.Context, user *domain.User) error
 	GetUserByUsername(ctx context.Context, username string) (*domain.User, error)
+	GetUserByID(ctx context.Context, id string) (*domain.User, error)
+	SearchUsers(ctx context.Context, name, id string, limit, offset int64) ([]domain.User, int64, error)
+}
+
+// EventRepo описывает методы работы с коллекцией событий
+type EventRepo interface {
 	CreateEvent(ctx context.Context, event *domain.Event) (string, error)
-	GetEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error)
+	FindEvents(ctx context.Context, filters map[string]interface{}, limit, offset int64) ([]domain.Event, int64, error)
+	GetEventByID(ctx context.Context, id string) (*domain.Event, error)
+	UpdateEvent(ctx context.Context, eid, uid string, updates bson.M) (bool, error)
 }
 
 type UserService struct {
-	repo UserRepo
+	userRepo  UserRepo
+	eventRepo EventRepo
 }
 
-func NewUserService(repo UserRepo) *UserService {
-	return &UserService{repo: repo}
+func NewUserService(ur UserRepo, er EventRepo) *UserService {
+	return &UserService{
+		userRepo:  ur,
+		eventRepo: er,
+	}
 }
 
 func (s *UserService) Register(ctx context.Context, fullName, username, password string) (*domain.User, error) {
@@ -37,12 +49,12 @@ func (s *UserService) Register(ctx context.Context, fullName, username, password
 		PasswordHash: string(hash),
 	}
 
-	err = s.repo.CreateUser(ctx, user)
+	err = s.userRepo.CreateUser(ctx, user)
 	return user, err
 }
 
 func (s *UserService) Login(ctx context.Context, username, password string) (*domain.User, error) {
-	user, err := s.repo.GetUserByUsername(ctx, username)
+	user, err := s.userRepo.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
@@ -55,14 +67,32 @@ func (s *UserService) Login(ctx context.Context, username, password string) (*do
 	return user, nil
 }
 
-// CreateEvent реализует создание события через репозиторий
-func (s *UserService) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
-	// Проставляем системную дату создания перед сохранением
-	event.CreatedAt = time.Now().Format(time.RFC3339)
-	return s.repo.CreateEvent(ctx, event)
+func (s *UserService) FindUsers(ctx context.Context, name, id string, limit, offset int64) ([]domain.User, int64, error) {
+	return s.userRepo.SearchUsers(ctx, name, id, limit, offset)
 }
 
-// ListEvents реализует получение списка с фильтрацией
-func (s *UserService) ListEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error) {
-	return s.repo.GetEvents(ctx, title, limit, offset)
+func (s *UserService) GetUserByID(ctx context.Context, id string) (*domain.User, error) {
+	return s.userRepo.GetUserByID(ctx, id)
+}
+
+// --- Event Logic ---
+
+func (s *UserService) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
+	// Дефолтная категория, если не указана
+	if event.Category == "" {
+		event.Category = "other"
+	}
+	return s.eventRepo.CreateEvent(ctx, event)
+}
+
+func (s *UserService) ListEvents(ctx context.Context, filters map[string]interface{}, limit, offset int64) ([]domain.Event, int64, error) {
+	return s.eventRepo.FindEvents(ctx, filters, limit, offset)
+}
+
+func (s *UserService) GetEventByID(ctx context.Context, id string) (*domain.Event, error) {
+	return s.eventRepo.GetEventByID(ctx, id)
+}
+
+func (s *UserService) PatchEvent(ctx context.Context, eid, uid string, updates bson.M) (bool, error) {
+	return s.eventRepo.UpdateEvent(ctx, eid, uid, updates)
 }

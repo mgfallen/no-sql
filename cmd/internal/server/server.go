@@ -19,14 +19,22 @@ func New(
 	logoutHandler http.HandlerFunc,
 	createEventHandler http.HandlerFunc,
 	listEventsHandler http.HandlerFunc,
+	getEventHandler http.HandlerFunc,
+	updateEventHandler http.HandlerFunc,
+	listUsersHandler http.HandlerFunc,
 ) *Server {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", healthHandler)
-
 	mux.Handle("/session", sessionHandler)
 
-	mux.HandleFunc("/users", registerHandler)
+	mux.HandleFunc("/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			listUsersHandler(w, r)
+		} else if r.Method == http.MethodPost {
+			registerHandler(w, r)
+		}
+	})
 
 	mux.HandleFunc("/auth/login", loginHandler)
 	mux.HandleFunc("/auth/logout", logoutHandler)
@@ -42,8 +50,17 @@ func New(
 		}
 	})
 
-	addr := net.JoinHostPort(host, port)
+	mux.HandleFunc("/events/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			getEventHandler(w, r)
+		} else if r.Method == http.MethodPatch {
+			updateEventHandler(w, r)
+		} else {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+		}
+	})
 
+	addr := net.JoinHostPort(host, port)
 	return &Server{
 		httpServer: &http.Server{
 			Addr:    addr,
