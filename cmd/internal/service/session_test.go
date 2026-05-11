@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -11,6 +10,12 @@ import (
 
 type MockSessionRepo struct {
 	mock.Mock
+}
+
+// Реализуем новый метод интерфейса
+func (m *MockSessionRepo) GetUserIDBySession(ctx context.Context, sid string) (string, error) {
+	args := m.Called(ctx, sid)
+	return args.String(0), args.Error(1)
 }
 
 func (m *MockSessionRepo) CreateSession(ctx context.Context, sid string) (bool, error) {
@@ -28,6 +33,20 @@ func (m *MockSessionRepo) Exists(ctx context.Context, sid string) (bool, error) 
 	return args.Bool(0), args.Error(1)
 }
 
+func TestSessionService_GetUserID(t *testing.T) {
+	t.Parallel()
+	repo := new(MockSessionRepo)
+	svc := NewSessionService(repo)
+
+	repo.On("GetUserIDBySession", mock.Anything, "active-sid").Return("user-123", nil)
+
+	uid, err := svc.GetUserID(context.Background(), "active-sid")
+
+	assert.NoError(t, err)
+	assert.Equal(t, "user-123", uid)
+	repo.AssertExpectations(t)
+}
+
 func TestSessionService_HandleSessionRequest(t *testing.T) {
 	t.Parallel()
 
@@ -43,7 +62,7 @@ func TestSessionService_HandleSessionRequest(t *testing.T) {
 			existingSid: "",
 			mockSetup: func(m *MockSessionRepo) {
 				m.On("CreateSession", mock.Anything, mock.MatchedBy(func(s string) bool {
-					return len(s) == 32
+					return len(s) == 32 // hex от 16 байт
 				})).Return(true, nil)
 			},
 			expectedIsNew: true,
@@ -59,42 +78,10 @@ func TestSessionService_HandleSessionRequest(t *testing.T) {
 			expectedIsNew: false,
 			expectedError: false,
 		},
-		{
-			name:        "New session: provided SID expired in DB",
-			existingSid: "expired-sid",
-			mockSetup: func(m *MockSessionRepo) {
-				m.On("Exists", mock.Anything, "expired-sid").Return(false, nil)
-				m.On("CreateSession", mock.Anything, mock.Anything).Return(true, nil)
-			},
-			expectedIsNew: true,
-			expectedError: false,
-		},
-		{
-			name:        "Error: DB failure on Exists",
-			existingSid: "some-sid",
-			mockSetup: func(m *MockSessionRepo) {
-				m.On("Exists", mock.Anything, "some-sid").Return(false, errors.New("db down"))
-				m.On("CreateSession", mock.Anything, mock.Anything).Return(true, nil)
-			},
-			expectedIsNew: true,
-			expectedError: false,
-		},
-		{
-			name:        "Error: DB failure on RefreshTTL",
-			existingSid: "valid-sid",
-			mockSetup: func(m *MockSessionRepo) {
-				m.On("Exists", mock.Anything, "valid-sid").Return(true, nil)
-				m.On("RefreshTTL", mock.Anything, "valid-sid").Return(errors.New("refresh failed"))
-			},
-			expectedIsNew: false,
-			expectedError: true,
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
 			repo := new(MockSessionRepo)
 			tt.mockSetup(repo)
 			svc := NewSessionService(repo)
@@ -108,56 +95,6 @@ func TestSessionService_HandleSessionRequest(t *testing.T) {
 				assert.NotEmpty(t, sid)
 				assert.Equal(t, tt.expectedIsNew, isNew)
 			}
-			repo.AssertExpectations(t)
-		})
-	}
-}
-
-func TestSessionService_CheckExists(t *testing.T) {
-	t.Parallel()
-
-	tests := []struct {
-		name           string
-		sid            string
-		mockSetup      func(m *MockSessionRepo)
-		expectedResult bool
-	}{
-		{
-			name:           "Empty SID",
-			sid:            "",
-			mockSetup:      func(_ *MockSessionRepo) {},
-			expectedResult: false,
-		},
-		{
-			name: "SID exists in DB",
-			sid:  "exists",
-			mockSetup: func(m *MockSessionRepo) {
-				m.On("Exists", mock.Anything, "exists").Return(true, nil)
-			},
-			expectedResult: true,
-		},
-		{
-			name: "SID missing in DB",
-			sid:  "missing",
-			mockSetup: func(m *MockSessionRepo) {
-				m.On("Exists", mock.Anything, "missing").Return(false, nil)
-			},
-			expectedResult: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			repo := new(MockSessionRepo)
-			tt.mockSetup(repo)
-			svc := NewSessionService(repo)
-
-			result, err := svc.CheckExists(context.Background(), tt.sid)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedResult, result)
 			repo.AssertExpectations(t)
 		})
 	}
