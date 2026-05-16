@@ -68,7 +68,7 @@ func TestHealthHandler(t *testing.T) {
 		{
 			name:           "4. POST /health - method not allowed",
 			method:         http.MethodPost,
-			mockBehavior:   func(m *MockSessionChecker) {},
+			mockBehavior:   func(_ *MockSessionChecker) {},
 			expectedStatus: http.StatusMethodNotAllowed,
 		},
 	}

@@ -69,7 +69,7 @@ func TestSessionHandler_ServeHTTP(t *testing.T) {
 		{
 			name:           "4. Wrong Method - GET - 405 Method Not Allowed",
 			method:         http.MethodGet,
-			mockBehavior:   func(m *MockSessionProcessor) {},
+			mockBehavior:   func(_ *MockSessionProcessor) {},
 			expectedStatus: http.StatusMethodNotAllowed,
 		},
 	}
@@ -92,10 +92,7 @@ func TestSessionHandler_ServeHTTP(t *testing.T) {
 
 			res := rec.Result()
 			defer func(Body io.ReadCloser) {
-				err := Body.Close()
-				if err != nil {
-					t.Fatal(err)
-				}
+				_ = Body.Close()
 			}(res.Body)
 
 			assert.Equal(t, tt.expectedStatus, res.StatusCode)
@@ -112,7 +109,6 @@ func TestSessionHandler_ServeHTTP(t *testing.T) {
 	}
 }
 
-// Helper для проверки куки
 func requireCookie(t *testing.T, cookies []*http.Cookie, expectedValue string, expectedTTL int) {
 	t.Helper()
 	var found bool
