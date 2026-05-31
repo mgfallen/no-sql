@@ -3,18 +3,20 @@ package service
 import (
 	"context"
 	"errors"
-	"no-sql/cmd/internal/domain"
 	"time"
+
+	"no-sql/cmd/internal/domain"
 
 	"golang.org/x/crypto/bcrypt"
 )
 
-// UserRepo -
+// UserRepo описывает контракты для работы с MongoDB
 type UserRepo interface {
 	CreateUser(ctx context.Context, user *domain.User) error
 	GetUserByUsername(ctx context.Context, username string) (*domain.User, error)
 	CreateEvent(ctx context.Context, event *domain.Event) (string, error)
-	GetEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error)
+	QueryEvents(ctx context.Context, filters map[string]string, limit, offset int64) ([]domain.Event, int64, error)
+	UpdateEvent(ctx context.Context, id string, createdBy string, category string, price *uint64, city *string) error
 }
 
 type UserService struct {
@@ -57,12 +59,25 @@ func (s *UserService) Login(ctx context.Context, username, password string) (*do
 
 // CreateEvent реализует создание события через репозиторий
 func (s *UserService) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
-	// Проставляем системную дату создания перед сохранением
 	event.CreatedAt = time.Now().Format(time.RFC3339)
 	return s.repo.CreateEvent(ctx, event)
 }
 
-// ListEvents реализует получение списка с фильтрацией
-func (s *UserService) ListEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error) {
-	return s.repo.GetEvents(ctx, title, limit, offset)
+// ListEvents теперь принимает map[string]string и делегирует построение bson.M репозиторию
+func (s *UserService) ListEvents(ctx context.Context, filters map[string]string, limit, offset int64) ([]domain.Event, int64, error) {
+	if limit <= 0 {
+		limit = 10
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	return s.repo.QueryEvents(ctx, filters, limit, offset)
+}
+
+// UpdateEvent выполняет PATCH-обновление эвента с проверкой прав создателя
+func (s *UserService) UpdateEvent(ctx context.Context, id string, createdBy string, category string, price *uint64, city *string) error {
+	if id == "" || createdBy == "" {
+		return errors.New("invalid event id or creator id")
+	}
+	return s.repo.UpdateEvent(ctx, id, createdBy, category, price, city)
 }

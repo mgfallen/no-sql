@@ -3,8 +3,9 @@ package service
 import (
 	"context"
 	"errors"
-	"no-sql/cmd/internal/domain"
 	"testing"
+
+	"no-sql/cmd/internal/domain"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -14,17 +15,6 @@ import (
 
 type MockUserRepo struct {
 	mock.Mock
-}
-
-// Реализуем новые методы для событий
-func (m *MockUserRepo) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
-	args := m.Called(ctx, event)
-	return args.String(0), args.Error(1)
-}
-
-func (m *MockUserRepo) GetEvents(ctx context.Context, title string, limit, offset int64) ([]domain.Event, int64, error) {
-	args := m.Called(ctx, title, limit, offset)
-	return args.Get(0).([]domain.Event), args.Get(1).(int64), args.Error(2)
 }
 
 func (m *MockUserRepo) CreateUser(ctx context.Context, user *domain.User) error {
@@ -40,6 +30,33 @@ func (m *MockUserRepo) GetUserByUsername(ctx context.Context, username string) (
 	return args.Get(0).(*domain.User), args.Error(1)
 }
 
+func (m *MockUserRepo) CreateEvent(ctx context.Context, event *domain.Event) (string, error) {
+	args := m.Called(ctx, event)
+	return args.String(0), args.Error(1)
+}
+
+// Обновленный метод мока: теперь принимает map[string]string
+func (m *MockUserRepo) QueryEvents(ctx context.Context, filters map[string]string, limit, offset int64) ([]domain.Event, int64, error) {
+	args := m.Called(ctx, filters, limit, offset)
+
+	var events []domain.Event
+	if args.Get(0) != nil {
+		events = args.Get(0).([]domain.Event)
+	}
+	return events, args.Get(1).(int64), args.Error(2)
+}
+
+func (m *MockUserRepo) UpdateEvent(ctx context.Context, id string, createdBy string, category string, price *uint64, city *string) error {
+	args := m.Called(ctx, id, createdBy, category, price, city)
+	return args.Error(0)
+}
+
+func setupUserService() (*UserService, *MockUserRepo) {
+	mockRepo := new(MockUserRepo)
+	svc := NewUserService(mockRepo)
+	return svc, mockRepo
+}
+
 func TestUserService_CreateEvent(t *testing.T) {
 	t.Parallel()
 	svc, mockRepo := setupUserService()
@@ -51,7 +68,7 @@ func TestUserService_CreateEvent(t *testing.T) {
 
 	assert.NoError(t, err)
 	assert.Equal(t, "event-id-123", id)
-	assert.NotEmpty(t, event.CreatedAt) // Проверка, что сервис проставил дату
+	assert.NotEmpty(t, event.CreatedAt)
 	mockRepo.AssertExpectations(t)
 }
 
@@ -60,10 +77,19 @@ func TestUserService_ListEvents(t *testing.T) {
 	svc, mockRepo := setupUserService()
 
 	expectedEvents := []domain.Event{{Title: "E1"}}
-	mockRepo.On("GetEvents", mock.Anything, "test", int64(10), int64(0)).
+
+	// Подготавливаем мапу фильтров, которую хендлер передает в сервис
+	testFilters := map[string]string{
+		"title":    "test",
+		"category": "party",
+		"city":     "Frankfurt",
+	}
+
+	// Мок ожидает чистую мапу map[string]string, построение bson.M переехало в репозиторий
+	mockRepo.On("QueryEvents", mock.Anything, testFilters, int64(10), int64(0)).
 		Return(expectedEvents, int64(1), nil)
 
-	events, count, err := svc.ListEvents(context.Background(), "test", 10, 0)
+	events, count, err := svc.ListEvents(context.Background(), testFilters, 10, 0)
 
 	assert.NoError(t, err)
 	assert.Equal(t, int64(1), count)
@@ -71,11 +97,26 @@ func TestUserService_ListEvents(t *testing.T) {
 	mockRepo.AssertExpectations(t)
 }
 
-// setupUserService подготавливает окружение для теста
-func setupUserService() (*UserService, *MockUserRepo) {
-	mockRepo := new(MockUserRepo)
-	svc := NewUserService(mockRepo)
-	return svc, mockRepo
+func TestUserService_UpdateEvent(t *testing.T) {
+	t.Parallel()
+	svc, mockRepo := setupUserService()
+
+	price := uint64(500)
+	city := "Frankfurt"
+
+	mockRepo.On("UpdateEvent", mock.Anything, "ev-1", "usr-1", "concert",
+		mock.MatchedBy(func(p *uint64) bool { return p != nil && *p == price }),
+		mock.MatchedBy(func(c *string) bool { return c != nil && *c == city }),
+	).Return(nil)
+
+	err := svc.UpdateEvent(context.Background(), "ev-1", "usr-1", "concert", &price, &city)
+	assert.NoError(t, err)
+
+	// Тест на валидацию пустых полей в сервисе
+	err = svc.UpdateEvent(context.Background(), "", "usr-1", "concert", nil, nil)
+	assert.Error(t, err)
+
+	mockRepo.AssertExpectations(t)
 }
 
 func TestUserService_Register(t *testing.T) {
@@ -86,7 +127,7 @@ func TestUserService_Register(t *testing.T) {
 		fullName string
 		username string
 		password string
-		mockErr  error // Добавили поле, чтобы убрать ошибку компиляции
+		mockErr  error
 		wantErr  bool
 	}{
 		{

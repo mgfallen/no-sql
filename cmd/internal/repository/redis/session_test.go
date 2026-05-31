@@ -1,4 +1,4 @@
-package repository
+package redis
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestSessionRepository_CreateSession(t *testing.T) {
+func TestRepository_CreateSession(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -34,6 +34,7 @@ func TestSessionRepository_CreateSession(t *testing.T) {
 			sid:  "taken-sid",
 			ttl:  30,
 			setup: func(mr *miniredis.Miniredis) {
+				// В miniredis метод HSet возвращает void, вызываем его как выражение
 				mr.HSet("sid:taken-sid", "created_at", "2026-01-01T00:00:00Z")
 			},
 			expectedExist: true,
@@ -47,7 +48,7 @@ func TestSessionRepository_CreateSession(t *testing.T) {
 
 			mr := miniredis.RunT(t)
 			client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-			repo := NewSessionRepository(client, tt.ttl)
+			repo := NewRepository(client, tt.ttl)
 			ctx := context.Background()
 
 			tt.setup(mr)
@@ -66,7 +67,7 @@ func TestSessionRepository_CreateSession(t *testing.T) {
 	}
 }
 
-func TestSessionRepository_RefreshTTL(t *testing.T) {
+func TestRepository_RefreshTTL(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -82,6 +83,7 @@ func TestSessionRepository_RefreshTTL(t *testing.T) {
 			prepare: func(mr *miniredis.Miniredis) {
 				key := "sid:active-session"
 				pastTime := time.Now().Add(-1 * time.Hour).Format(time.RFC3339)
+
 				mr.HSet(key, "created_at", pastTime)
 				mr.HSet(key, "updated_at", pastTime)
 				mr.SetTTL(key, 10*time.Second)
@@ -95,7 +97,7 @@ func TestSessionRepository_RefreshTTL(t *testing.T) {
 
 			mr := miniredis.RunT(t)
 			client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-			repo := NewSessionRepository(client, tt.ttl)
+			repo := NewRepository(client, tt.ttl)
 			ctx := context.Background()
 
 			tt.prepare(mr)
@@ -111,7 +113,7 @@ func TestSessionRepository_RefreshTTL(t *testing.T) {
 	}
 }
 
-func TestSessionRepository_Exists(t *testing.T) {
+func TestRepository_Exists(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
@@ -142,7 +144,7 @@ func TestSessionRepository_Exists(t *testing.T) {
 
 			mr := miniredis.RunT(t)
 			client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-			repo := NewSessionRepository(client, 60)
+			repo := NewRepository(client, 60)
 			ctx := context.Background()
 
 			tt.setup(mr)
@@ -155,80 +157,12 @@ func TestSessionRepository_Exists(t *testing.T) {
 	}
 }
 
-func TestSessionRepository_BindUser(t *testing.T) {
+func TestRepository_DeleteSession(t *testing.T) {
 	t.Parallel()
 
 	mr := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	repo := NewSessionRepository(client, 60)
-	ctx := context.Background()
-
-	sid := "test-session"
-	userID := "user-12345"
-
-	t.Run("Successfully bind user to session", func(t *testing.T) {
-		err := repo.BindUser(ctx, sid, userID)
-
-		assert.NoError(t, err)
-		assert.Equal(t, userID, mr.HGet("sid:"+sid, "user_id"))
-	})
-}
-func TestSessionRepository_GetUserIDBySession(t *testing.T) {
-	t.Parallel()
-
-	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	repo := NewSessionRepository(client, 60)
-	ctx := context.Background()
-
-	tests := []struct {
-		name           string
-		sid            string
-		setup          func(mr *miniredis.Miniredis)
-		expectedUserID string
-	}{
-		{
-			name: "User ID found",
-			sid:  "sid-with-user",
-			setup: func(mr *miniredis.Miniredis) {
-				mr.HSet("sid:sid-with-user", "user_id", "user-777")
-			},
-			expectedUserID: "user-777",
-		},
-		{
-			name: "Session exists but no user_id bound",
-			sid:  "sid-no-user",
-			setup: func(mr *miniredis.Miniredis) {
-				mr.HSet("sid:sid-no-user", "created_at", "now")
-			},
-			expectedUserID: "",
-		},
-		{
-			name:           "Session does not exist at all",
-			sid:            "ghost-sid",
-			setup:          func(mr *miniredis.Miniredis) {},
-			expectedUserID: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tt.setup(mr)
-
-			uid, err := repo.GetUserIDBySession(ctx, tt.sid)
-
-			assert.NoError(t, err)
-			assert.Equal(t, tt.expectedUserID, uid)
-		})
-	}
-}
-
-func TestSessionRepository_DeleteSession(t *testing.T) {
-	t.Parallel()
-
-	mr := miniredis.RunT(t)
-	client := redis.NewClient(&redis.Options{Addr: mr.Addr()})
-	repo := NewSessionRepository(client, 60)
+	repo := NewRepository(client, 60)
 	ctx := context.Background()
 
 	sid := "to-be-deleted"
